@@ -14,8 +14,5 @@ COPY . .
 # Build the application
 RUN go build -o jwt-service
 
-# Expose the port the service will run on
-EXPOSE 8080
-
 # Command to run the application
 CMD ["./jwt-service"]
