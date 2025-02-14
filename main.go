@@ -7,9 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
-
 	"strconv"
+	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/golang-jwt/jwt/v5"
@@ -63,14 +62,14 @@ func verifyJWT(tokenString string) (*jwt.Token, error) {
 func fetchUserData(username string, isDoctor bool) (map[string]string, error) {
 	var userServiceURL string
 	if isDoctor {
-		userServiceURL = os.Getenv("DOCTOR_SERVICE_URL")
+		userServiceURL = os.Getenv("DOCTOR_SERVICE_URL") + "/read-doctor/doctors/username/" + username
 	} else {
-		userServiceURL = os.Getenv("USER_SERVICE_URL")
+		userServiceURL = os.Getenv("USER_SERVICE_URL") + "/read-patient/patients/username/" + username
 	}
 
-	resp, err := http.Get(fmt.Sprintf("%s/read/%s", userServiceURL, username))
+	resp, err := http.Get(userServiceURL)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("User not found")
+		return nil, fmt.Errorf("user not found")
 	}
 	defer resp.Body.Close()
 
@@ -91,13 +90,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		http.Error(w, "Invalid input data", http.StatusBadRequest)
+		http.Error(w, "invalid input data", http.StatusBadRequest)
 		return
 	}
 
 	userData, err := fetchUserData(creds.Username, creds.IsDoctor)
 	if err != nil {
-		http.Error(w, "User not found", http.StatusUnauthorized)
+		http.Error(w, "user not found", http.StatusUnauthorized)
 		return
 	}
 
@@ -110,7 +109,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	verifyJSON, _ := json.Marshal(verifyData)
 	resp, err := http.Post(fmt.Sprintf("%s/verify", verifyServiceURL), "application/json", bytes.NewBuffer(verifyJSON))
 	if err != nil || resp.StatusCode != http.StatusOK {
-		http.Error(w, "Authentication error", http.StatusUnauthorized)
+		http.Error(w, "authentication error", http.StatusUnauthorized)
 		return
 	}
 	defer resp.Body.Close()
@@ -119,7 +118,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		Valid bool `json:"valid"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&verifyResponse); err != nil || !verifyResponse.Valid {
-		http.Error(w, "Incorrect password", http.StatusUnauthorized)
+		http.Error(w, "incorrect password", http.StatusUnauthorized)
 		return
 	}
 
@@ -128,17 +127,16 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		role = "doctor"
 	}
 
-	// Convierte el ID de string a int
 	id, err := strconv.Atoi(userData["id"])
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusInternalServerError)
+		http.Error(w, "invalid user ID format", http.StatusInternalServerError)
 		return
 	}
 
 	user := User{ID: id, Role: role, Username: userData["username"]}
 	token, err := generateJWT(user)
 	if err != nil {
-		http.Error(w, "Error generating token", http.StatusInternalServerError)
+		http.Error(w, "error generating token", http.StatusInternalServerError)
 		return
 	}
 
@@ -151,13 +149,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 func verifyTokenHandler(w http.ResponseWriter, r *http.Request) {
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
-		http.Error(w, "Token required", http.StatusUnauthorized)
+		http.Error(w, "token required", http.StatusUnauthorized)
 		return
 	}
 
 	_, err := verifyJWT(tokenString)
 	if err != nil {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	}
 
