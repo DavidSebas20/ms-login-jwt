@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"strconv"
+
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
@@ -57,6 +59,29 @@ func verifyJWT(tokenString string) (*jwt.Token, error) {
 	})
 }
 
+// Fetch user data from the appropriate service
+func fetchUserData(username string, isDoctor bool) (map[string]string, error) {
+	var userServiceURL string
+	if isDoctor {
+		userServiceURL = os.Getenv("DOCTOR_SERVICE_URL")
+	} else {
+		userServiceURL = os.Getenv("USER_SERVICE_URL")
+	}
+
+	resp, err := http.Get(fmt.Sprintf("%s/read/%s", userServiceURL, username))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("User not found")
+	}
+	defer resp.Body.Close()
+
+	var userData map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&userData); err != nil {
+		return nil, fmt.Errorf("error processing server response")
+	}
+
+	return userData, nil
+}
+
 // Login handler
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var creds struct {
@@ -70,22 +95,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch user from the user service
-	userServiceURL := os.Getenv("USER_SERVICE_URL")
-	resp, err := http.Get(fmt.Sprintf("%s/read-patient/patients/username/%s", userServiceURL, creds.Username))
-	if err != nil || resp.StatusCode != http.StatusOK {
+	userData, err := fetchUserData(creds.Username, creds.IsDoctor)
+	if err != nil {
 		http.Error(w, "User not found", http.StatusUnauthorized)
-		return
-	}
-	defer resp.Body.Close()
-
-	var userData struct {
-		ID           int    `json:"id"`
-		Username     string `json:"username"`
-		PasswordHash string `json:"passwordHash"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&userData); err != nil {
-		http.Error(w, "Error processing server response", http.StatusInternalServerError)
 		return
 	}
 
@@ -93,10 +105,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	verifyServiceURL := os.Getenv("VERIFY_SERVICE_URL")
 	verifyData := map[string]string{
 		"password": creds.Password,
-		"hash":     userData.PasswordHash,
+		"hash":     userData["passwordHash"],
 	}
 	verifyJSON, _ := json.Marshal(verifyData)
-	resp, err = http.Post(fmt.Sprintf("%s/verify", verifyServiceURL), "application/json", bytes.NewBuffer(verifyJSON))
+	resp, err := http.Post(fmt.Sprintf("%s/verify", verifyServiceURL), "application/json", bytes.NewBuffer(verifyJSON))
 	if err != nil || resp.StatusCode != http.StatusOK {
 		http.Error(w, "Authentication error", http.StatusUnauthorized)
 		return
@@ -111,14 +123,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine role
 	role := "patient"
 	if creds.IsDoctor {
 		role = "doctor"
 	}
 
-	// Generate JWT
-	user := User{ID: userData.ID, Role: role, Username: userData.Username}
+	// Convierte el ID de string a int
+	id, err := strconv.Atoi(userData["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusInternalServerError)
+		return
+	}
+
+	user := User{ID: id, Role: role, Username: userData["username"]}
 	token, err := generateJWT(user)
 	if err != nil {
 		http.Error(w, "Error generating token", http.StatusInternalServerError)
