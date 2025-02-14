@@ -1,0 +1,70 @@
+name: Sync ms-encrypt to Domain Repository
+on:
+  push:
+    branches:
+      - QA
+      - Dev
+      - main
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout microservice repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Get latest commit message
+        id: commit_message
+        run: |
+          # Obtener el mensaje del último commit y escaparlo
+          COMMIT_MSG=$(git log -1 --pretty=%B | sed 's/[\/&]/\\&/g' | tr '\n' ' ')
+          echo "COMMIT_MSG=$COMMIT_MSG" >> $GITHUB_ENV
+
+      - name: Checkout domain repository
+        uses: actions/checkout@v3
+        with:
+          repository: DavidSebas20/domain-security-auth
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          path: domain_repo
+
+      - name: Clean up existing files in domain repository
+        run: |
+          cd domain_repo
+          # Eliminar archivos no rastreados antes de cambiar de rama
+          git clean -fd
+          git reset --hard
+
+      - name: Ensure branch exists in domain repository
+        run: |
+          cd domain_repo
+          git fetch origin
+          if ! git show-ref --verify --quiet refs/heads/${{ github.ref_name }}; then
+            # Si la rama no existe, crearla y sincronizar con la remota
+            git checkout --track origin/${{ github.ref_name }} || git checkout -b ${{ github.ref_name }}
+          else
+            # Si la rama existe, cambiar a ella y sincronizar con la remota
+            git checkout ${{ github.ref_name }}
+            git pull origin ${{ github.ref_name }} --rebase
+          fi
+
+      - name: Copy microservice to domain repository
+        run: |
+          rm -rf domain_repo/ms-login-jwt
+          mkdir -p domain_repo/ms-login-jwt
+          rsync -av --exclude='.git' --exclude='domain_repo' . domain_repo/ms-login-jwt/
+
+      - name: Commit and push changes
+        run: |
+          cd domain_repo
+          git config --global user.email "davidsebastian20@outlook.com"
+          git config --global user.name "DavidSebas20"
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "${{ env.COMMIT_MSG }}"
+          # Resolver conflictos automáticamente si es necesario
+          git pull origin ${{ github.ref_name }} --rebase || git merge origin/${{ github.ref_name }} --strategy-option theirs
+          git push origin ${{ github.ref_name }}
