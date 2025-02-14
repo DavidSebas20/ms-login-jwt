@@ -162,10 +162,17 @@ func verifyTokenHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Health check handler
+func HealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
 func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/login", loginHandler).Methods("POST")
 	r.HandleFunc("/verify-token", verifyTokenHandler).Methods("GET")
+	http.HandleFunc("/healthz", HealthCheck)
 
 	port := os.Getenv("PORT")
 	if port == "" {
